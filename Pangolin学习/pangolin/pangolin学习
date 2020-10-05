@@ -1,0 +1,12 @@
+安装pangolin
+
+sudo apt-get install libglew-dev
+sudo apt-get install cmake
+sudo apt-get install libboost-dev libboost-thread-dev libboost-filesystem-dev
+
+git clone https://github.com/stevenlovegrove/Pangolin.git
+cd Pangolin
+mkdir build
+cd build
+cmake -DCPP11_NO_BOOST=1 ..
+make -j

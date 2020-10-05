@@ -1,0 +1,16 @@
+CMakeLists.txt
+
+cmake_minimum_required( VERSION 2.8 )
+project( visualizeGeometry )
+
+set(CMAKE_CXX_FLAGS "-std=c++11")
+set( CMAKE_BUILD_TYPE Release )
+
+find_package( Pangolin )
+
+find_package( OpenCV REQUIRED )
+
+include_directories( ${Pangolin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${EIGEN3_LIBS} )
+
+add_executable( visualizeGeometry visualizeGeometry.cpp )
+target_link_libraries( visualizeGeometry ${Pangolin_LIBRARIES} ${OpenCV_LIBS} ${EIGEN3_LIBS} )
