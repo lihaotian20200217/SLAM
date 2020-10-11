@@ -147,7 +147,141 @@ int main (int argc, char** argv )
         float dd = d/1000.0 // 深度单位为 mm 所以转化为 m 除去尺度因子
         Point2d p1 = pixel2cam ( keypoints_1[m.queryIdex].pt, K); // 像素坐标转相机下归一化坐标 x,y,1
         pts_3d.push_back(Point3f(p1.x*dd,p1.y*dd,dd)); // 3D点 第一幅图像中的特征点对应的3维点
-        pts_2d.push_back(keypoints_2[m.trainIdx].pt);
-
+        pts_2d.push_back(keypoints_2[m.trainIdx].pt);// 2D点 第二幅图像中的特征点
     }
+
+    cout << "3d-2d 点对数 : "<<pts_3d.size() << endl;
+    // 利用 PnP 求解初始解
+    Mat r, t; // 得到初始旋转向量r和平移量t
+    solvePnP(pts_3d,pts_2d,K,Mat(),r,t,false);// 调用OpenCV的PnP求解
+    Mat R;
+    cv::Rodrigues(r,R);// r为旋转量形式,用Rodrigues公式转换为矩阵 罗德里格斯公式 将旋转向量转旋转矩阵
+    cout << "初始旋转矩阵 R=" << endl << R << endl;
+    cout << "初始平移向量 t=" << endl << t << endl;
+
+    cout << "使用 bundle adjustment优化算法 对R和T进行优化：" << endl;
+    bundleAdjustment(pts_3d,pts_2d,K,R,t);
+}
+
+// 特征匹配 计算匹配点对 函数
+void find_feature_matches(const Mat& img_1, const Mat& img2, std::vector<KeyPoint>& keypoints_1,std::vector<KeyPoint>& keypoints_2,std::vector<DMatch>& matches)
+{
+    //--------------------第0步：初始化-------------------
+    Mat descriptors_1, descriptors_2; // 描述子
+    Ptr<FeatureDetector> detector = ORB::create();//特征点检测器
+    Prt<DescriptorExtractor> descriptor = ORB::create();
+    // opencv2 特征点检测器 描述子生成器 用法
+    // Ptr<FeatureDetector> detector = FeatureDetector::;create("ORB");
+    // Ptr<DescriptorExtractor> descriptor = DescriptorExtractor::create("ORB");
+    Ptr<DescriptorExtractor> matcher = DescriptorMatcher::create("BruteForce-Hamming"); // 二进制描述子
+
+    // --第一步：检测 Oriented FAST 角点位置
+    detector->detect(img_1,keypoints_1);
+    detector->detect(img_2,keypoints_2);
+
+    // --第二步：根据角点位置计算 BRIEF 描述子
+    descriptor->compute(img_1,keypoints_1,descriptors_1);
+    descriptor->compute(img_2,keypoints_2,descriptors_2);
+
+    // --第三步:对两幅图像中的BRIEF描述子进行匹配，使用Hamming距离
+    vector<DMatch> match;
+    matcher->match(descriptors_1,descriptors_2,match);
+
+    // --第四步：匹配点对筛选
+    double min_dist = 10000, max_dist = 0;
+
+    // 找出所有匹配之间的最小距离和最大距离，即是最相似的和最不相似的两组点间的距离
+    for (int i = 0; i < descriptors_1.rows; i++)
+    {
+        double dist = match[i].distance;
+        if (dist < min_dist) min_dist = dist;
+        if (dist > max_dist) max_dist = dist;
+    }
+
+    // 当描述子之间的距离大于两倍的最小距离时，即认为匹配有误，但也要为最小距离设置下限
+    for (int i = 0; i < descriptors_1.rows; i++)
+    {
+        if (match[i].distance <= max(2*min_dist,30.0))
+        {
+            matches.push_back(match[i]);
+        }
+    }
+}
+
+Point2d pixel2cam(const Point2d& p, const Mat& K)
+{
+    return Point2d
+        (
+            (p.x - K.at<double>(0,2)) / K.at<double>(0,0), // x = (px-cx)/fx
+            (p.y - K.at<double>(1,2)) / K.at<double>(1,1) // y=(py-cy)/fy
+        );
+}
+
+// g2o_BundleAdjustment 优化
+void bundleAdjustment (
+    const vector<Point3f> points_3d, // 两幅图像 特征点对中 其一点 根据深度信息得到世界坐标系下的3D点
+    const vector<Point2f> points_2d, // 特征点对中的两个2D点
+    const Mat& K,
+    Mat& R, Mat& t 
+)
+{
+    // 初始化g2o
+    typedef g2o::BlockSolver<g2o::BlockSolverTraits<6,3>> Block; // pose 维度为6（优化变量的维度），landmark 维度为3
+    Block::LinearSolverType* linearSolver = new g2o::LinearSolverCSparse<Block::PoseMatrixType>(); // 线性方程求解器
+    Block* solver_ptr = new Block(linearSolver); // 矩阵块求解器
+    g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);//LM优化
+    g2o::SparseOptimizer optimizer; // 稀疏优化模型
+    optimizer.setAlgorithm(solver);//设置求解器
+
+    // 顶点1 vertex 优化变量 相机位姿
+    g2o::VertexSE3Expmap* pose = new g2o::VertexSE3Expmap(); // camera pose 旋转矩阵 R 平移矩阵 t 的李代数形式
+    Eigen::Matrix3d R_mat; // 3*3 矩阵 
+    R_mat << 
+            R.at<double>(0,0), R.at<double>(0,1), R.at<double>(0,2),
+            R.at<double>(1,0), R.at<double>(1,1), R.at<double>(1,2),
+            R.at<double>(2,0), R.at<double>(2,1), R.at<double>(2,2);
+    pose->setId(0); //
+    pose->estimate(g2o::SE3Quat(R_mat,Eigen::Vector3d(t.at<double>(0,0),t.at<double>(1,0),t.at<double>(2,0))));
+    optimizer.addVertex(pose);//添加顶点
+    // 顶点2 空间点
+    int index = 1;
+    for (const Point3f p : points_3d)
+    {
+        g2o::VertexSBAPointXYZ* point = new g2o::VertexSBAPointXYZ(); // 空间点
+        point->setId(index++);
+        point->setEstimate(Eigen::Vector3d(p.x,p.y,p.z));
+        point->setMarginalized(true);
+        optimizer.addVertex(point);
+    }
+
+    // 给优化模型添加相机参数！
+    g2o::CameraParameters* camera = new g2o::CameraParameters(
+        K.at<double>(0,0),Eigen::Vector2d(K.at<double>(0,2),K.at<double>(1,2)),0
+    )
+    camera->setId(0);
+    optimizer.addParameter(camera); // 相机参数 
+
+    // 边 edges 
+    index = 1;
+    for (const Point2f p : points_2d)
+    {
+        g2o::EdgeProjectXYZ2UV* edge = new g2o::EdgeProjectXYZ2UV(); // 3D-2D点对，误差项，投影方程
+        edge->setId(index);
+        edge->setVertex(0,dynamic_cast<g2o::VertexSBAPointXYZ*>(optimizer.vertex(index)));
+        edge->setVertex(1,pose);
+        edge->setMeasurement(Eigen::Vector2d(p.x,p.y)); // 观测数据
+        edge->setParameterId(0,0);
+        edge->setInformation(Eigen::Matrix2d::Identity());//误差项系数矩阵  信息矩阵：单位阵协方差矩阵   横坐标误差  和 纵坐标 误差
+        optimizer.addEdge(edge);
+        index++;
+    }
+
+    chrono::steady_clock::time_point t1 = chrono::steady_clock::now();// 计时开始
+    optimizer.setVertex(true);
+    optimizer.initializeOptimization(); // 初始化
+    optimizer.optimize(100); // 优化次数
+    chrono::steady_clock::time_point t2 = chrono::steady_clock::now(); // 计时结束
+    chrono::duration<double> time_used = chrono::duration_cast<chrono::duration<double>> (t2-t1);
+    cout << time_used.count << endl;
+    cout << Eigen::Isometry3d(pose->estimate()).matrix() << endl;
 }
