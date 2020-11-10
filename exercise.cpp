@@ -1,53 +1,63 @@
-void TrackKLT::perform_matching(const std::vector<cv::Mat>& img0pyr, const std::vector<cv::Mat>& img1pyr, std::vector<cv::KeyPoint>& kpts0, std::vector<cv::KeyPoint>& kpts1, size_t id0, size_t id1, std::vector<uchar>& mask_out) {
-	
-	assert(kpts0.size() == kpts1.size());
+std::vector<cv::KeyPoint> good_left, good_right;
+std::vector<size_t> good_ids_left, good_ids_right;
 
-	if (kpts0.empty() || kpts1.empty()) return;
+for (size_t i=0; i<pts_left_new.size(); i++)
+{
+	if (pts_left_new[i].pt.x < 0 || pts_left_new[i].pt.y < 0 || (int)pts_right_new[i].pt.x > img_left.cols || (int)pts_right_new[i].pt.y > img_left.rows) continue;
 
-	std::vector<cv::Point2f> pts0, pts1;
-	for (size_t i=0; i < kpts0.size(); i++)
+	bool found_right = false;
+	size_t index_right = 0;
+	for (size_t n=0; n<ids_last[cam_id_right].size(); n++)
 	{
-		pts0.push_back(kpts0.at(i).pt);
-		pts1.push_back(kpts1.at(i).pt);
-	}
-
-	if (pts0.size() < 10)
-	{
-		for (size_t i=0; i < pts0.size(); i++)
+		if (ids_last[cam_id_left].at(i)==ids_last[cam_id_right].at(n))
 		{
-			mask_out.push_back((uchar)0);
+			found_right = true;
+			index_right = n;
+			break;
 		}
-		return;
 	}
 
-	std::vector<uchar> mask_klt;
-	std::vector<float> error;
-	cv::TermCriteria term_crit = cv::TermCriteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 15, 0.01);
-	cv::calcOpticalFlowPyrLK(img0pyr, img1pyr, pts0, pts1, mask_klt, error, win_size, pyr_levels, term_crit, cv::OPTFLOW_USE_INITIAL_FLOW);
-
-	std::vector<cv::Point2f> pts0_n, pts1_n;
-	for (size_t i=0; i < pts0.size(); i++)
+	if (mask_ll[i] && found_right && mask_rr[index_right])
 	{
-		pts0_n.push_back(undistort_point(pts0.at(i),id0));
-		pts1_n.push_back(undistort_point(pts1.at(i),id1));
-	}
-
-	std::vector<uchar> mask_rsc;
-	double max_focallength_img0 = std::max(camera_k_OPENCV.at(id0)(0,0),camera_k_OPENCV.at(id0)(1,1));
-	double max_focallength_img1 = std::max(camera_k_OPENCV.at(id1)(0,0),camera_k_OPENCV.at(id1)(1,1));
-	double max_focallength = std::max(max_focallength_img0,max_focallength_img1);
-	cv::findFundamentalMat(pts0_n, pts1_n, cv::FM_RANSAC, 1/max_focallength, 0.999, mask_rsc);
-
-	for (size_t i=0; i < mask_klt.size(); i++)
+		if (pts_right_new.at(index_right).pt.x < 0 || pts_right_new.at(index_right).pt.y < 0 || (int)pts_right_new[i].pt.x > img_right.cols || (int)pts_right_new[i].pt.y > img_right.rows) continue;
+		good_left.push_back(pts_left_new.at(i));
+		good_right.push_back(pts_right_new.at(index_right));
+		good_ids_left.push_back(ids_last[cam_id_left].at(i));
+		good_ids_right.push_back(ids_last[cam_id_right].at(index_right));
+	} else if(mask_ll[i]) 
 	{
-		auto mask = (uchar)((i < mask_klt.size() && mask_klt[i] && i < mask_rsc.size() && mask_rsc[i])? 1 : 0);
-		mask_out.push_back(mask);
+		good_left.push_back(pts_left_new.at(i));
+		good_ids_left.push_back(ids_last[cam_id_left].at(i));
 	}
-	
-	for (size_t i=0; i < pts0.size(); i++)
-	{
-		kpts0.at(i).pt = pts0.at(i);
-		kpts1.at(i).pt = pts1.at(i);
-	}
-
 }
+
+
+for (size_t i=0; i < pts_right_new.size(); i++)
+{
+	if (pts_right_new[i].pt.x < 0 || pts_right_new[i].pt.y < 0 || (int)pts_right_new[i].pt.x > img_right.cols || (int)pts_right_new[i].pt.y > img_right.rows) continue;
+
+	bool added_already = (std::find(good_ids_right.begin(),good_ids_right.end(),ids_last[cam_id_right].at(i))!=good_ids_right.end());
+	if (mask_rr[i] && !added_already) {
+		good_right.push_back(pts_right_new.at(i));
+		good_ids_right.push_back(ids_last[cam_id_right].at(i));
+	}
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
