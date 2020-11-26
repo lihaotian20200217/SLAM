@@ -768,9 +768,7 @@ bag.open(path_to_bag, rosbag::bagmode::Read);
 			}
 
 	
-		3. MSCKF features and KLT tracks that are SLAM features
-		
-		
+		3. MSCKF features and KLT tracks that are SLAM features.		
 
 
 
