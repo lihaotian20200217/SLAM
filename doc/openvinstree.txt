@@ -1,0 +1,155 @@
+main                                    
+	ov_msckf::VioManager::VioManager(nh);
+	(run_subscribe_msckf.cpp)
+	ov_msckf::RosVisualizer::RosVisualizer(nh,sys);
+	(run_subscribe_msckf.cpp)
+	callback_inertial();
+	(run_subscribe_msckf.cpp)
+	                                               feed_measurement_imu();
+												   (VioManager.cpp)
+												                             feed_imu();
+																			 (Propagator.h)
+	
+	callback_stereo();
+	(run_subscribe_msckf.cpp)	
+	                                               feed_measurement_stereo();
+												   (VioManager.cpp)
+	                                                                         feed_stereo(); 
+																		     (TrackDescriptor.cpp)
+																		                                    cv::equalizeHist();
+																								
+																								            perform_detection_stereo();
+																								            (TrackDescriptor.cpp)
+																								                                        perform_griding();
+																															            (Grider_FAST.h)
+																															                                                 cv::FAST();
+																															            robust_match();
+																															            (TrackDescriptor.cpp)
+																															                                                 cv::knnMatch();
+																																				 
+																																				                             robust_ratio_test();
+																																				                             (TrackDescriptor.cpp)
+																																				 
+																																				                             robust_symmetry_test();
+																																				                             (TrackDescriptor.cpp)
+																																				 
+																																				                             undistort_point();
+																																				                             (TrackBase.h)
+																																				 
+																																				                             cv::findFundamentalMat();
+																								            update_feature();
+																								            (FeatureDatabase.h)
+																			 try_to_initialize();
+																			 (VioManager.cpp)
+																			                                initialize_with_imu();
+																								            (InertialInitializer.cpp)
+																			 do_feature_propagate_update();
+																			 (VioManager.cpp)
+																			                                propagate_and_clone();
+																											(Propagator.cpp)
+																											                            select_imu_readings();
+																																		(Propagator.cpp)
+																																		                                     interpolate_data();
+																																							                 (Propagator.h)
+																																		predict_and_compute();
+																																		(Propagator.cpp)
+																																		                                     predict_mean_discrete();
+																																							                 (Propagator.cpp)
+																																		augment_clone();
+																																		(StateHelper.cpp)
+																																		                                     clone();
+																																							                 (StateHelper.cpp)
+																															                                                 insert_clone();
+																																							                 (State.h)
+																																							                 options();
+																																							                 (State.h)
+																											get_feature_database();
+																											(TrackBase.h)
+																											                            features_containing();
+																																		(FeatureDatabase.h)
+																											options();
+																											(State.h)
+																											
+																											features_SLAM();
+																											(State.h)
+																											
+																											marginalize_slam();
+																											(StateHelper.h)
+																											                            features_SLAM();
+																																		(State.h)
+																																		
+																																		marginalize();
+																																		(StateHelper.cpp)
+																											update();
+																											(UpdaterMSCKF.cpp)
+																											                            get_clones();
+																																		(State.h)
+																																		
+																																		clean_old_measurements();
+																																		(Feature.cpp)
+																																		
+																																		single_triangulation();
+																																		(FeatureInitializer.cpp)
+																																		
+																																		single_gaussnewton();
+																																		(FeatureInitializer.cpp)
+																																		
+																																		features_SLAM();
+																											                            (State.h)
+																																		
+																																		is_relative_representation();
+																																		(FeatureRepresentation.h)
+																																		
+																																		get_feature_jacobian_full();
+																																		(UpdaterHelper.cpp)
+																																		                                    is_relative_representation()
+																																									        (FeatureRepresentation.h)
+																																											  
+																																		                                    get_feature_jacobian_representation();
+																																		                                    (UpdaterHelper.cpp)
+																																											  
+																																											get_feature_jacobian_intrinsics();
+																																											(UpdaterHelper.cpp)
+																																		nullspace_project_inplace();
+																																		(UpdaterHelper.cpp)
+																																		
+																																		get_marginal_covariance();
+																																		(StateHelper.cpp)
+																																		
+																																		measurement_compress_inplace();
+																																		(UpdaterHelper.cpp)
+																																		
+																																		EKFUpdate();
+																																		(StateHelper.cpp)
+																																		                                    get_marginal_covariance();
+																																											(StateHelper.cpp)
+																																											  
+																																											update();
+																																											(State.h)
+							                       visualize();
+												   (RosVisualizer.cpp)
+												                             publish_images();
+																			 (RosVisualizer.cpp)
+																			 publish_state();
+																			 (RosVisualizer.cpp)
+																			 publish_features();
+																			 (RosVisualizer.cpp)
+																			 publish_groundtruth();
+																			 (RosVisualizer.cpp)
+																			 sim_save_total_state_to_file();
+																			 (RosVisualizer.cpp)
+																			
+																															                     
+                                                                                                																								
+                                                            	
+	
+	
+	
+	
+	
+	
+	
+	
+	visualize_final();
+	(run_subscribe_msckf.cpp)
+	                                               

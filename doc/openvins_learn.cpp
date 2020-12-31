@@ -768,7 +768,254 @@ bag.open(path_to_bag, rosbag::bagmode::Read);
 			}
 
 	
-		3. MSCKF features and KLT tracks that are SLAM features.		
+		3. MSCKF features and KLT tracks that are SLAM features.
+			获取过时的量测：
+			std::vector<Feature*> feats_lost = trackFEATS->get_feature_database()->features_not_containing_newer(state->timestamp());
+			获取要使用的特征：
+			if ((int)state->n_clones() > state->options().max_clone_size)
+				feats_marg = trackFEATS->get_feature_database()->features_containing(state->margtimestep());
+				/*
+				-------------------------------------------------------------------------------------------------------------
+				State.h
+				double margtimestep() {
+					double time = INFINITY;
+					for (std::pair<const double, PoseJPL *> &clone_imu : _clones_IMU) {
+						if (clone_imu.first < time) {
+							time = clone_imu.first;
+						}
+					}
+					return time;
+				}
+				找出最早的时间，也就是我们要边缘化的时间！
+				-------------------------------------------------------------------------------------------------------------
+
+				-------------------------------------------------------------------------------------------------------------
+				FeatureDatabase.h
+				std::vector<Feature *> features_containing(double timestamp, bool remove=false);
+				*************************************************************************************************************
+				变量说明:
+				std::unordered_map<size_t, Feature *> features_idlookup; size() 一般为两位数！
+				std::unordered_map<size_t, std::vector<double>> timestamps; size()为2，因为是左右两个相机！
+				timestamps.second对应一个vector<double> 它的长度在1~12，上限取决于滑窗长度！
+				*************************************************************************************************************
+
+				寻找跟踪超过一定时长的特征，这些可以作为SLAM特征！
+				std::vector<Feature*> feats_maxtracks;
+				auto it2 = feats_marg.begin();
+				while (it2 != feats_marg.end()) {
+					bool reached_max = false;
+					for (const auto &cams : (*it2)->timestamp) {
+						if ((int)cams.second.size() > state->options().max_clone_size) {
+							reached_max = true;
+							break;
+						}
+					}
+
+					if (reached_max) {
+						feats_maxtracks.push_back(*it2);
+						it2 = feats_marg.erase(it2);
+					} else {
+						it2++;
+					}
+				}
+
+				如果还有空间则加入slam特征！
+				if (state->options().max_slam_features > 0 && timestamp-startup_time >= dt_statupdelay && (int)state->features_SLAM().size() < state->options().max_slam_features+curr_aruco_tags) {
+					int amount_to_add = (state->options().max_slam_features+curr_aruco_tags)-(int)state->features_SLAM().size();
+					int valid_amount = (amount_to_add > (int)feats_maxtracks.size()) ? (int)feats_maxtracks.size() : amount_to_add;
+
+					if (valid_amount > 0) {
+						feats_slam.insert(feats_slam.end(), feats_maxtracks.end()-valid_amount, feats_maxtracks.end());
+						feats_maxtracks.erase(feats_maxtracks.end()-valid_amount, feats_maxtracks.end());
+					}
+				}
+				-------------------------------------------------------------------------------------------------------------
+				*/
+
+				去除要边缘化的点
+				StateHelper::marginalize_slam(state);(static void marginalize_slam(State* state)
+				执行：StateHelper::marginalize(state,(*it0).second);(void StateHelper::marginalize(State *state, Type *marg))
+				首先会确认状态中是否有slam的landmark；
+				直接在协方差矩阵中去除slam特征点对应的协方差块！
+				/*
+					注：这里的Type *marg 对应 std::unordered_map<size_t, Landmark*> _features_SLAM;
+				*/
+				/*
+				------------------------------------------------------------------------------------------------------------
+				int marg_size = marg->size();
+				int marg_id = marg->id();
+
+				Eigen::MatrixXd Cov_new(state->n_vars() - marg_size, state->n_vars() - marg_size);
+
+				int x2_size = (int)state->n_vars() - marg_id - marg_size;
+
+				Cov_new.block(0, 0, marg_id, marg_id) = state->Cov().block(0, 0, marg_id, marg_id);
+
+				Cov_new.block(0, marg_id,  marg_id, x2_size) = state->Cov().block(0, marg_id + marg_size, marg_id, x2_size);
+
+				Cov_new.block(marg_id, 0, x2_size, marg_id) = Cov_new.block(0, marg_id, marg_id, x2_size).transpose();
+
+				Cov_new.block(marg_id, marg_id, x2_size, x2_size) = state->Cov().block(marg_id + marg_size, marg_id + marg_size, x2_size, x2_size);
+				state->Cov() = Cov_new;
+
+				去除VIO中被边缘化的量并做重新调整！
+				std::vector<Type *> remaining_variables;
+				for (size_t i = 0; i < state->variables().size(); i++) {
+					if (state->variables(i) != marg_id) {
+						// 如果没有被边缘化
+						if (state->variables(i)->id() > marg_id) {
+							// 如果该变量的id在被边缘化的变量之后，就要统一前移
+							state->variables(i)->set_local_id(state->variables(i)->id() - marg_size);
+						}
+						remaining_variables.push_back(state->variables(i));
+					}
+				}
+
+				delete marg;
+
+				state->variables() = remaining_variables;
+				------------------------------------------------------------------------------------------------------------
+				*/
+
+				------------------------------------------------------------------------------------------------------------
+				把本次新产生的特征中新的和旧的分离！
+				std::vector<Feature*> feats_slam_DELAYED, feats_slam_UPDATE;
+				for (size_t i=0; i<feats_slam.size(); i++) {
+					if (state->features_SLAM().find(feats_slam.at(i)->featid) != state->features_SLAM().end()) {
+						feats_slam_UPDATE.push_back(feats_slam.at(i));
+					} else {
+						feats_slam_DELAYED.push_back(feats_slam.at(i));
+					}	
+				}
+
+				全部放到MSCKF特征里！
+				std::vector<Feature*> featsup_MSCKF = feats_lost;
+				featsup_MSCKF.insert(featsup_MSCKF.end(), feats_marg.begin(), feats_marg.end());
+				featsup_MSCKF.insert(featsup_MSCKF.end(), feats_maxtracks.begin(), feats_maxtracks.end());
+				------------------------------------------------------------------------------------------------------------
+				featsup_MSCKF大概二十多个点！
+
+				更新：updaterMSCKF->update(state, featsup_MSCKF);
+					0.获取滑窗内的时间戳！
+					--------------------------------------------------------------------------------------------------------
+					std::vector<double> clonetimes;
+					for (const auto& clone_imu : state->get_clones()) {
+						clonetimes.emplace_back(clone_imu.first);
+					} 长度一般为12
+					--------------------------------------------------------------------------------------------------------
+
+					1.去掉不在滑窗时间范围内的特征,只关注滑窗内的特征点就足够了！
+					--------------------------------------------------------------------------------------------------------
+					从featsup_MSCKF里每次取一个特征然后执行：clean_old_measurements(clonetimes);
+					/*
+						void Feature::clean_old_measurements(std::vector<double> valid_times) {
+							for (auto const &pair : timestamps) {
+								
+								assert(timestamps[pair.first].size() == uvs[pair.first].size());
+								assert(timestamps[pair.first].size() == uvs_norm[pair.first].size());
+
+								auto it1 = timestamps[pair.first].begin();
+								auto it2 = uvs[pair.first].begin();
+								auto it3 = uvs_norm[pair.first].begin();
+
+								while (it1 != timestamps[pair.first].end()) {
+									if (std::find(valid_times.begin(),valid_times.end(),*it1) == valid_times.end()) {
+										it1 = timestamps[pair.first].erase(it1);
+										it2 = uvs[pair.first].erase(it2);
+										it3 = uvs_norm[pair.first].erase(it2);
+									} else {
+										++it1;
+										++it2;
+										++it3;
+									}
+								}
+							}
+						}
+					*/
+					--------------------------------------------------------------------------------------------------------
+					2.对左右相机，根据滑窗内的所有IMU位姿，推算每对相机的位姿！
+					/*
+					--------------------------------------------------------------------------------------------------------
+					std::unordered_map<size_t, std::unordered_map<double, FeatureInitializer::ClonePose>> clones_cam;
+					for (const auto &clone_calib : state->get_calib_IMUtoCAMs()) { // 两次循环分别使用左右相机的内参
+						
+						std::unordered_map<double, FeatureInitializer::ClonePose> clones_cami;
+						for (const auto &clone_imu : state->get_clones()) {
+							// 循环每一个时刻的状态!
+							// 得到当前相机位姿!
+							Eigen::Matrix<double,3,3> R_GtoCi = clone_calib.second->Rot()*clone_imu.second->Rot();
+							Eigen::Matrix<double,3,1> p_CioinG = clone_imu.second->pos() - R_GtoCi.transpose()*clone_calib.second->pos();
+							clones_cami.insert({clone_imu.first,FeatureInitializer::ClonePose(R_GtoCi,p_CioinG)});
+						}
+
+						clones_cam.insert({clone_calib.first,clone_cami});
+					}
+					clone_calib是从imu系到相机Ci系的转移矩阵，clone_imu.second->Rot()指代q_GtoI从全局到imu的转移矩阵！
+					R(GtoCi) = R(itoCi) * R(Gtoi);
+					P(itoG) = P(CitoG) + R(CitoG)*P(itoCi);
+					所以:P(CitoG) = P(itoG) - R(CitoG)*P(itoCi);
+					--------------------------------------------------------------------------------------------------------
+					*/
+
+					3.三角化特征点的3D坐标，(已知滑窗内所有的相机位姿，和特征点的2D匹配点坐标)先三角化初始值再BA优化！
+					--------------------------------------------------------------------------------------------------------
+					auto it1 = feature_vec.begin();
+					while (it1 != feature_vec.end()) {//每次取出一个特征
+						bool success = initializer_feat->single_triangulation(*it1, clones_cam);
+						// 三角化失败的话删除特征进入下一次循环！
+						/*
+							
+						*/
+					}
+					--------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
